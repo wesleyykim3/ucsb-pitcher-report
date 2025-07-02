@@ -16,17 +16,17 @@ library(zoo)
 library(reticulate)
 
 # Uncomment for local machine
-# use_virtualenv("/Users/wesleykim/.virtualenvs/r-reticulate", required = TRUE) 
+# reticulate::use_condaenv("/Users/wesleykim/miniforge3/envs/ucsb-baseball", required = TRUE)
 
 # Uncomment for Docker
-# use_virtualenv("/opt/venv", required = TRUE) 
+use_virtualenv("/opt/venv", required = TRUE)
 
 # Uncomment for hosting on shinyapps.io
-py_install(c(
-  "joblib==1.4.2",
-  "numpy==2.2.2",
-  "pandas==2.2.3",
-  "scikit-learn==1.4.2"))
+# py_install(c(
+#   "joblib==1.5.1",
+#   "numpy==2.2.6",
+#   "pandas==2.3.0",
+#   "scikit-learn==1.7.0"))
 
 ultimate <- read.csv("Ultimate_UCSB_25-(full).csv")
 
@@ -41,6 +41,15 @@ swing_model <- joblib$load('swing_model.joblib')
 take_model <- joblib$load('take_model.joblib')
 
 DR_average <- -6.034251343668578
+
+# ECDFs
+# This is wrong because the cdfs need to be generated from all D1 data as opposed to just UCSB data, which is what this is doing
+# Sam should have the code to do it and then you need to figure out how to export those cdfs into this file
+pdfSR  <- ecdf(ultimate$SpinRate)
+pdfEV  <- ecdf(ultimate$EffectiveVelo)
+pdfRH  <- ecdf(ultimate$RelHeight)
+pdfIVB <- ecdf(ultimate$InducedVertBreak)
+pdfHB  <- ecdf(ultimate$HorzBreak)
 
 ultimate <- ultimate %>%
   mutate(Date = mdy(Date),  # Convert to Date format
@@ -82,14 +91,30 @@ ultimate <- ultimate %>%
            )
          ),
          `Stuff+` = case_when(
-           TaggedPitchType == 'Fastball' ~ 100,
-           TaggedPitchType == 'Cutter' ~ 100,
-           TaggedPitchType == 'Sinker' ~ 100,
-           TaggedPitchType == 'ChangeUp' ~ 100,
-           TaggedPitchType == 'Slider' ~ 100,
-           TaggedPitchType == 'Curveball' ~ 100
-         )
-  )
+           (TaggedPitchType == "Fastball" | TaggedPitchType == "Cutter" | TaggedPitchType == "Sinker") ~ (
+              (0.17 * pdfSR(SpinRate) +
+              0.18 * pdfEV(EffectiveVelo) +
+              0.15 * (abs(pdfRH(RelHeight)      - .5) * 2) +
+              0.19 * (abs(pdfIVB(InducedVertBreak) - .5) * 2) +
+              0.20 * (abs(pdfHB(HorzBreak)      - .5) * 2) + 0.5) * 100 
+           ),
+           TaggedPitchType == "Slider"   ~ (
+             (0.17 * pdfSR(SpinRate) +
+             0.19 * pdfEV(EffectiveVelo) +
+             0.18 * (abs(pdfRH(RelHeight)      - .5) * 2) +
+             0.20 * (abs(pdfIVB(InducedVertBreak) - .5) * 2) +
+             0.19 * (abs(pdfHB(HorzBreak)      - .5) * 2) + 0.5) * 100
+           ),
+           TaggedPitchType == "Curveball" ~ (
+             (0.18 * pdfSR(SpinRate) +
+             0.19 * pdfEV(EffectiveVelo) +
+             0.17 * (abs(pdfRH(RelHeight)      - .5) * 2) +
+             0.17 * (abs(pdfIVB(InducedVertBreak) - .5) * 2) +
+             0.20 * (abs(pdfHB(HorzBreak)      - .5) * 2) + 0.5) * 100 
+           ),
+           TRUE ~ NA_real_
+         ),
+  ) 
 
 team_names <- setNames(
   c("Oregon Ducks", "California Bears", "USC Trojans", "UCSB Gauchos",
@@ -412,7 +437,7 @@ server <- function(input, output, session) {
           geom_text(data = dataFilter, aes(x = ContactPositionZ, y = ContactPositionX, label = FoulLabel), hjust = .4, vjust = 0.5, size = 4, color = "black") +
           scale_color_manual(values = pitch_colors)
       }
-    
+      
     # Pitch Location Plot
     pitch_location_data <- pitcherultimate %>%
       filter(Pitcher == input$PitcherInput,
@@ -422,7 +447,7 @@ server <- function(input, output, session) {
     pitch_location_plot <- ggplot(data = pitch_location_data, aes(x = PlateLocSide * -1, y = PlateLocHeight,
                                                                   color = TaggedPitchType, shape = PitchCall)) +
       xlim(-3, 3) + ylim(0, 5) +
-      labs(color = "", title = "Pitch Location") +
+      labs(color = "", shape = "", title = "Pitch Location") +
       geom_rect(aes(xmin = -0.83, xmax = 0.83, ymin = 1.5, ymax = 3.5), alpha = 0, size = 1, color = "black") +
       geom_segment(aes(x = -0.708, y = 0.35, xend = 0.708, yend = 0.35), size = 1, color = "black") +
       geom_segment(aes(x = -0.708, y = 0.15, xend = -0.708, yend = 0.35), size = 1, color = "black") +
@@ -430,12 +455,42 @@ server <- function(input, output, session) {
       geom_segment(aes(x = 0, y = 0, xend = 0.708, yend = 0.15), size = 1, color = "black") +
       geom_segment(aes(x = 0.708, y = 0.15, xend = 0.708, yend = 0.35), size = 1, color = "black") +
       geom_point(size = 7, na.rm = TRUE) +
-      scale_color_manual(values = pitch_colors, guide = guide_legend(nrow = 2)) +
+      scale_color_manual(values = pitch_colors, guide = guide_legend(nrow = 1)) +
       geom_text(aes(label = PitchofPA), vjust = 0.5, hjust = 0.4, size = 5, color = "black", fontface = 'bold') +
       theme_bw() +
       theme(
         plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
         legend.position = "bottom",
+        legend.box = "vertical",
+        legend.text = element_text(size = 8),
+        axis.title = element_blank(),
+        plot.margin = margin(0, 5, 0, 0)
+      )
+    
+    #Stuff+ Plot
+    stuff_plot <- ggplot(data = pitch_location_data, aes(x = PlateLocSide * -1, y = PlateLocHeight,
+                                                                  color = `Stuff+`, shape = TaggedPitchType)) +
+      xlim(-3, 3) + ylim(0, 5) +
+      labs(color = "Stuff+", shape = "", title = "Stuff+") +
+      geom_rect(aes(xmin = -0.83, xmax = 0.83, ymin = 1.5, ymax = 3.5), alpha = 0, size = 1, color = "black") +
+      geom_segment(aes(x = -0.708, y = 0.35, xend = 0.708, yend = 0.35), size = 1, color = "black") +
+      geom_segment(aes(x = -0.708, y = 0.15, xend = -0.708, yend = 0.35), size = 1, color = "black") +
+      geom_segment(aes(x = -0.708, y = 0.15, xend = 0, yend = 0), size = 1, color = "black") +
+      geom_segment(aes(x = 0, y = 0, xend = 0.708, yend = 0.15), size = 1, color = "black") +
+      geom_segment(aes(x = 0.708, y = 0.15, xend = 0.708, yend = 0.35), size = 1, color = "black") +
+      geom_point(size = 7, na.rm = TRUE) +
+      scale_color_gradient(
+        low = "blue",
+        high = "red",
+        limits = c(50, 150),
+        oob = scales::squish,
+      ) +
+      geom_text(aes(label = PitchofPA), vjust = 0.5, hjust = 0.4, size = 5, color = "black", fontface = 'bold') +
+      theme_bw() +
+      theme(
+        plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+        legend.position = "bottom",
+        legend.box = "vertical",
         legend.text = element_text(size = 8),
         axis.title = element_blank(),
         plot.margin = margin(0, 5, 0, 0)
@@ -479,7 +534,7 @@ server <- function(input, output, session) {
       )
     
     # Combine with patchwork 
-    contact_plot | pitch_location_plot | spray_chart_plot
+    contact_plot | pitch_location_plot | stuff_plot | spray_chart_plot
   })
   
   
@@ -511,7 +566,7 @@ server <- function(input, output, session) {
                PitchCall %in% c("FoulBallFieldable", "FoulBallNotFieldable", "FoulBall") ~ "Foul Ball",
                TRUE ~ PitchCall
              ),
-             `Stuff+` = `Stuff+`,
+             `Stuff+` = formatC(`Stuff+`, format = "f", digits = 0),
              DR = round(if_else(DR==0, NA, DR), 3)
       ) %>%
       arrange(PitchofPA) %>%
@@ -623,7 +678,7 @@ server <- function(input, output, session) {
           scale_color_manual(values = pitch_colors) +
           labs(
             title = "Pitch Location",
-            color = "Pitch Type"
+            color = ""
           ) +
           theme_bw() +
           theme(
