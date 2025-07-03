@@ -16,10 +16,10 @@ library(zoo)
 library(reticulate)
 
 # Uncomment for local machine
-# reticulate::use_condaenv("/Users/wesleykim/miniforge3/envs/ucsb-baseball", required = TRUE)
+reticulate::use_condaenv("/Users/wesleykim/miniforge3/envs/ucsb-baseball", required = TRUE)
 
 # Uncomment for Docker
-use_virtualenv("/opt/venv", required = TRUE)
+# use_virtualenv("/opt/venv", required = TRUE)
 
 # Uncomment for hosting on shinyapps.io
 # py_install(c(
